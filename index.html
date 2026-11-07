@@ -1,0 +1,1582 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Prism — music-reactive visual</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@200;300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    color-scheme: dark;
+    --ink: #f2efe9;
+    --dim: #8e8a84;
+    --edge: rgba(242,239,233,.16);
+    --panel: rgba(8,8,10,.82);
+    --bg: #000;
+    --warm: #e8c37a;
+    --sans: "Jost", "Futura", "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ color-scheme: dark; } }
+  :root[data-theme="dark"]{ color-scheme: dark; }
+
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; margin:0; background:var(--bg); }
+  body{
+    font-family:var(--sans);
+    color:var(--ink);
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ---------- stage ---------- */
+  #stage{
+    position:fixed; inset:0;
+    display:grid; place-items:center;
+    background:#000;
+  }
+  #frame{
+    position:relative;
+    background:#000;
+    overflow:hidden;
+    box-shadow:0 0 120px rgba(0,0,0,.9);
+  }
+  #gl{ display:block; width:100%; height:100%; }
+
+  /* ---------- lyric / title layer ---------- */
+  #type{
+    position:absolute; inset:0;
+    display:grid; grid-template-rows:1fr auto;
+    pointer-events:none;
+    padding:0 8% 12%;
+    mix-blend-mode:screen;
+  }
+  #titleBlock{
+    align-self:center; text-align:center;
+    opacity:0; transform:scale(.985);
+    transition:opacity 2.4s ease, transform 6s ease;
+  }
+  #titleBlock.on{ opacity:1; transform:scale(1); }
+  #songTitle{
+    margin:0; font-weight:200; letter-spacing:.34em;
+    font-size:clamp(21px, calc(var(--fw, 100vw) * 0.075), 74px);
+    text-indent:.34em;
+    text-shadow:
+      -2px 0 rgba(255,40,80,.45),
+       2px 0 rgba(40,160,255,.45),
+       0 0 48px rgba(255,255,255,.3);
+  }
+  #songSub{
+    margin:1.1em 0 0; font-weight:300; letter-spacing:.44em;
+    text-indent:.44em;
+    font-size:clamp(9px, calc(var(--fw, 100vw) * 0.018), 15px);
+    color:var(--warm); opacity:.85;
+  }
+  #cue{
+    align-self:end; text-align:center;
+    font-weight:300; letter-spacing:.16em;
+    font-size:clamp(14px, calc(var(--fw, 100vw) * 0.042), 30px);
+    line-height:1.5;
+    opacity:0; transform:translateY(14px);
+    transition:opacity 1.3s ease, transform 1.6s ease, filter 1.3s ease;
+    filter:blur(6px);
+    text-shadow:-1.5px 0 rgba(255,40,80,.4), 1.5px 0 rgba(40,160,255,.4), 0 0 30px rgba(255,255,255,.25);
+  }
+  #cue.on{ opacity:1; transform:translateY(0); filter:blur(0); }
+
+  #blackout{
+    position:absolute; inset:0; background:#000; opacity:0; pointer-events:none;
+  }
+
+  /* ---------- hud ---------- */
+  #hud{
+    position:fixed; left:0; right:0; bottom:0;
+    padding:14px 18px calc(14px + env(safe-area-inset-bottom, 0px));
+    display:flex; align-items:center; gap:14px;
+    font-size:11px; letter-spacing:.2em; color:var(--dim);
+    background:linear-gradient(to top, rgba(0,0,0,.75), transparent);
+    transition:opacity .5s ease; opacity:0;
+  }
+  #hud.show{ opacity:1; }
+  #hud.gone{ display:none; }
+  #hud button{
+    font:inherit; letter-spacing:.2em; color:var(--ink);
+    background:transparent; border:1px solid var(--edge); border-radius:999px;
+    padding:7px 14px; cursor:pointer;
+  }
+  #hud button:hover{ border-color:var(--ink); }
+  #hud button:focus-visible{ outline:2px solid var(--warm); outline-offset:2px; }
+  #bar{ flex:1; height:1px; background:var(--edge); position:relative; }
+  #barFill{ position:absolute; inset:0 auto 0 0; width:0; background:var(--warm); }
+  #clock{ font-variant-numeric:tabular-nums; min-width:92px; }
+  #scene{ min-width:96px; text-align:right; color:var(--warm); opacity:.8; }
+
+  /* ---------- setup ---------- */
+  #setup{
+    position:fixed; inset:0; overflow:auto;
+    background:radial-gradient(120% 90% at 50% 10%, #141018 0%, #000 65%);
+    display:grid; place-items:center;
+    padding:calc(28px + env(safe-area-inset-top,0px)) 20px calc(28px + env(safe-area-inset-bottom,0px));
+    z-index:5;
+  }
+  #setup.gone{ display:none; }
+  .card{ width:min(560px, 100%); }
+  .brand{
+    font-weight:200; letter-spacing:.42em; text-indent:.42em;
+    font-size:clamp(20px,4vw,34px); margin:0 0 6px;
+  }
+  .tag{ margin:0 0 30px; color:var(--dim); font-size:13px; font-weight:300; line-height:1.7; letter-spacing:.04em; max-width:46ch; }
+  label{ display:block; font-size:10.5px; letter-spacing:.26em; color:var(--dim); margin:0 0 7px; }
+  input[type=text], textarea, select{
+    width:100%; font:inherit; font-size:14px; font-weight:300; letter-spacing:.06em;
+    color:var(--ink); background:rgba(255,255,255,.04);
+    border:1px solid var(--edge); border-radius:4px; padding:11px 13px;
+  }
+  textarea{ min-height:104px; resize:vertical; line-height:1.7; }
+  input:focus, textarea:focus, select:focus{ outline:none; border-color:var(--warm); }
+  .field{ margin-bottom:18px; }
+  .row{ display:flex; gap:14px; }
+  .row > *{ flex:1; }
+  .hint{ font-size:11.5px; color:var(--dim); margin:7px 0 0; line-height:1.6; font-weight:300; }
+  .filebtn{
+    display:flex; align-items:center; gap:12px;
+    border:1px dashed var(--edge); border-radius:4px; padding:13px;
+    cursor:pointer; font-size:13px; font-weight:300; color:var(--dim);
+  }
+  .filebtn:hover{ border-color:var(--warm); color:var(--ink); }
+  .filebtn input{ display:none; }
+  button.mini{
+    font:inherit; font-size:10.5px; letter-spacing:.18em; color:var(--ink);
+    background:transparent; border:1px solid var(--edge); border-radius:999px;
+    padding:11px 13px; cursor:pointer; white-space:nowrap;
+  }
+  button.mini:hover{ border-color:var(--warm); }
+  button.mini:focus-visible{ outline:2px solid var(--warm); outline-offset:2px; }
+  #enter{
+    width:100%; margin-top:10px; font:inherit; font-size:12px; font-weight:400;
+    letter-spacing:.34em; text-indent:.34em; color:#0b0b0b; background:var(--warm);
+    border:0; border-radius:999px; padding:16px; cursor:pointer;
+  }
+  #enter:hover{ background:#f3d492; }
+  #enter:focus-visible{ outline:2px solid var(--ink); outline-offset:3px; }
+  .keys{ margin:18px 0 0; font-size:11px; color:var(--dim); letter-spacing:.1em; line-height:1.9; font-weight:300; }
+  .keys b{ color:var(--ink); font-weight:400; }
+  #tap{
+    position:fixed; inset:0; z-index:40; display:none;
+    align-items:center; justify-content:center; cursor:pointer;
+    background:rgba(0,0,0,.55); backdrop-filter:blur(2px);
+    font-size:12px; letter-spacing:.26em; color:var(--ink); text-align:center; padding:24px;
+  }
+  #crash{
+    position:fixed; left:0; right:0; top:0; z-index:99;
+    display:none; padding:calc(12px + env(safe-area-inset-top,0px)) 14px 12px;
+    background:#2a0d0d; color:#ffc9c9; border-bottom:1px solid #6b2626;
+    font-family:ui-monospace, Menlo, Consolas, monospace; font-size:12px;
+    line-height:1.55; white-space:pre-wrap; word-break:break-word;
+    -webkit-user-select:text; user-select:text;
+  }
+  #err{ color:#ff8d8d; font-size:12.5px; margin-top:14px; display:none; line-height:1.6; }
+  @media (prefers-reduced-motion: reduce){
+    #titleBlock, #cue{ transition-duration:.01ms; }
+  }
+</style>
+</head>
+<body>
+
+<div id="crash"></div>
+<div id="tap">TAP TO START THE SOUND</div>
+
+<div id="stage">
+  <div id="frame">
+    <canvas id="gl"></canvas>
+    <div id="type">
+      <div id="titleBlock">
+        <h1 id="songTitle"></h1>
+        <p id="songSub"></p>
+      </div>
+      <div id="cue"></div>
+    </div>
+    <div id="blackout"></div>
+  </div>
+</div>
+
+<div id="hud" class="show">
+  <button id="btnPlay" type="button">Pause</button>
+  <button id="btnRestart" type="button">Restart</button>
+  <div id="bar"><div id="barFill"></div></div>
+  <div id="clock">0:00 / 4:30</div>
+  <div id="scene">Origin</div>
+  <button id="btnFull" type="button">Full screen</button>
+</div>
+
+<div id="setup">
+  <div class="card">
+    <h1 class="brand">Prism</h1>
+    <p class="tag">Four and a half minutes of light, built to be screen recorded. Load your Suno track and the visuals follow the music; leave it empty and it runs on its own clock.</p>
+
+    <div class="field">
+      <label for="fPreset">Preset</label>
+      <select id="fPreset"></select>
+      <div class="row" style="margin-top:10px">
+        <input id="fPresetName" type="text" placeholder="Name this setup" autocomplete="off" style="flex:1.7">
+        <button id="pSave" type="button" class="mini">Save</button>
+        <button id="pDel" type="button" class="mini">Delete</button>
+      </div>
+      <p class="hint">Stores the look — line under the title, frame, length, cosmos, mirror, phrase count — in this browser. Your last setup reloads on its own, so a new track is just lyrics and audio.</p>
+    </div>
+
+    <div class="field">
+      <label for="fTitle">Song title</label>
+      <input id="fTitle" type="text" value="Echoes of the Soul" autocomplete="off">
+    </div>
+
+    <div class="field">
+      <label for="fSub">Line under the title</label>
+      <input id="fSub" type="text" value="" placeholder="leave empty for none" autocomplete="off">
+    </div>
+
+    <div class="field">
+      <label for="fLyrics">Paste the full lyrics</label>
+      <textarea id="fLyrics" placeholder="Paste the whole song. Section markers like [Chorus] are ignored."></textarea>
+      <div class="row" style="margin-top:11px;align-items:flex-end">
+        <div style="flex:0 0 42%">
+          <label for="fCount">Phrases</label>
+          <select id="fCount">
+            <option value="auto" selected>Auto</option>
+            <option value="4">4</option><option value="6">6</option>
+            <option value="8">8</option><option value="10">10</option>
+            <option value="12">12</option>
+          </select>
+        </div>
+        <button id="distil" type="button" style="flex:1;font:inherit;font-size:11px;letter-spacing:.24em;color:var(--ink);background:transparent;border:1px solid var(--warm);border-radius:999px;padding:12px;cursor:pointer">Distil</button>
+      </div>
+      <p class="hint">Pulls the strongest short line from each equal stretch of the song, keeps them in order and spaces them evenly across the running time. Edit anything below before you begin.</p>
+    </div>
+
+    <div class="field">
+      <label for="fCues">Phrases on screen</label>
+      <textarea id="fCues">0:24 | It begins where words run out
+1:04 | Every fragment still carries the light
+1:48 | We kept what the storm could not take
+2:30 | Happiness remembered is happiness again
+3:14 | Love was the first language we spoke
+4:02 | And the echo travels on, ahead of us</textarea>
+      <p class="hint">Timestamp, vertical bar, text. Lines with no timestamp are spread evenly.</p>
+    </div>
+
+    <div class="field">
+      <label for="fAudio">Your track, optional</label>
+      <label class="filebtn" for="fAudio"><span>Choose an audio file</span><span id="fName" style="margin-left:auto;color:var(--warm)"></span>
+        <input id="fAudio" type="file" accept="audio/*">
+      </label>
+      <p class="hint">Played in the page so a screen recording captures picture and sound together. The bass drives the pulse.</p>
+    </div>
+
+    <div class="field">
+      <label for="fClips">Lucid dreams — videos or photos, up to 12</label>
+      <label class="filebtn" for="fClips"><span>Choose videos and photos</span><span id="cName" style="margin-left:auto;color:var(--warm)"></span>
+        <input id="fClips" type="file" accept="video/*,image/*" multiple>
+      </label>
+      <p class="hint">Each one surfaces for six seconds, in the order you pick them, spaced evenly across the whole song. They melt out of the light and back into it rather than cutting. Sky, cloud, nature and street material works best.</p>
+      <label style="display:flex;align-items:center;gap:9px;margin-top:11px;letter-spacing:.02em;font-size:12.5px;color:var(--ink);text-transform:none">
+        <input id="fMirror" type="checkbox" checked style="width:auto;accent-color:var(--warm)"> Mirror the dreams down the centre
+      </label>
+    </div>
+
+    <div class="row field">
+      <div>
+        <label for="fAspect">Frame</label>
+        <select id="fAspect">
+          <option value="0.5625" selected>9:16 vertical</option>
+          <option value="1.7777">16:9 widescreen</option>
+          <option value="1">1:1 square</option>
+          <option value="0">Fill the window</option>
+        </select>
+      </div>
+      <div>
+        <label for="fReact">Music reaction</label>
+        <select id="fReact">
+          <option value="0.6">Gentle</option>
+          <option value="1.0" selected>Balanced</option>
+          <option value="1.6">Strong</option>
+          <option value="0">Off</option>
+        </select>
+      </div>
+      <div>
+        <label for="fBpm">Tempo if silent</label>
+        <input id="fBpm" type="text" value="86" inputmode="numeric" autocomplete="off">
+      </div>
+    </div>
+
+    <div class="row field">
+      <div>
+        <label for="fCosmic">Cosmos</label>
+        <select id="fCosmic">
+          <option value="0.35">Subtle</option>
+          <option value="0.6" selected>Balanced</option>
+          <option value="1.0">Heavy</option>
+          <option value="0">Off</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row field">
+      <div>
+        <label for="fLen">Length</label>
+        <select id="fLen">
+          <option value="270" selected>4:30</option>
+          <option value="180">3:00</option>
+          <option value="240">4:00</option>
+          <option value="300">5:00</option>
+        </select>
+      </div>
+    </div>
+
+    <label style="display:flex;align-items:center;gap:9px;margin:0 0 18px;letter-spacing:.02em;font-size:12.5px;color:var(--ink)">
+      <input id="fRing" type="checkbox" checked style="width:auto;accent-color:var(--warm)"> Draw the spectrum as a ring of light
+    </label>
+
+    <button id="enter" type="button">Begin</button>
+    <p class="keys">Begin goes straight to full screen. <b>Space</b> pause · <b>R</b> restart · <b>H</b> hide the controls · <b>F</b> full screen · <b>Esc</b> leave full screen, again to come back here</p>
+    <p id="err"></p>
+  </div>
+</div>
+
+<audio id="aud" playsinline></audio>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ============ scene timeline ============ */
+  // index must match pick() in the shader
+  var SCENES = [
+    { name:"Origin",     dur:24 },  // 0 drift
+    { name:"Sky",        dur:30 },  // 1 clouds
+    { name:"Fragments",  dur:28 },  // 2 prism
+    { name:"Challenge",  dur:30 },  // 3 storm
+    { name:"The city",   dur:30 },  // 4 urban
+    { name:"Happiness",  dur:32 },  // 5 oil
+    { name:"Innocence",  dur:28 },  // 6 mandala
+    { name:"Journey",    dur:30 },  // 7 tunnel
+    { name:"The future", dur:26 },  // 8 eclipse
+    { name:"Echo",       dur:12 }   // 9 collapse
+  ];
+  var BLEND = 4.5;
+  var BASE_TOTAL = 270;
+
+  /* ============ shaders ============ */
+  var VERT = [
+    "attribute vec2 a_pos;",
+    "varying vec2 vUv;",
+    "void main(){ vUv = a_pos*0.5+0.5; gl_Position = vec4(a_pos,0.0,1.0); }"
+  ].join("\n");
+
+  /* one small program per scene — a single combined shader exceeds mobile GPU limits */
+  var GLSL_HEAD = `#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+uniform vec2 u_res;
+uniform float u_t;
+uniform float u_k;
+uniform float u_alpha;
+uniform float u_pulse;
+uniform float u_shake;
+uniform float u_cosmic;
+mat2 rot(float a){ float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
+float hash21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
+float noise(vec2 p){
+  vec2 i=floor(p), f=fract(p);
+  vec2 u=f*f*(3.0-2.0*f);
+  float a=hash21(i), b=hash21(i+vec2(1.0,0.0)), c=hash21(i+vec2(0.0,1.0)), d=hash21(i+vec2(1.0,1.0));
+  return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);
+}
+float fbm(vec2 p){
+  float v=0.0, a=0.5;
+  for(int i=0;i<5;i++){ v+=a*noise(p); p=rot(0.5)*p*2.02; a*=0.5; }
+  return v;
+}
+vec3 spectral(float t){ return 0.5+0.5*cos(6.28318*(t+vec3(0.0,0.33,0.67))); }
+float seg(vec2 p, vec2 a, vec2 b, float w){
+  vec2 pa=p-a, ba=b-a;
+  float h=clamp(dot(pa,ba)/dot(ba,ba),0.0,1.0);
+  return smoothstep(w,0.0,length(pa-ba*h));
+}`;
+
+  var SCENE_GLSL = [
+    { fn: "scDrift", src: `vec3 scDrift(vec2 uv, float t, float k){
+  vec3 col = vec3(0.015,0.015,0.03);
+  for(int j=0;j<3;j++){
+    float fj=float(j);
+    vec2 p = uv*(1.8+fj*2.4);
+    p.y += t*(0.02+fj*0.035);
+    p *= 7.0;
+    vec2 g = floor(p);
+    float h = hash21(g+fj*37.1);
+    vec2 c = fract(p)-0.5;
+    float tw = 0.45+0.55*sin(t*2.2+h*41.0);
+    float s = smoothstep(0.11,0.0,length(c))*step(0.955,h)*tw;
+    col += s*mix(vec3(0.65,0.8,1.0), vec3(1.0,0.85,0.65), h)*1.1;
+  }
+  float n = fbm(uv*1.4 + vec2(t*0.03,-t*0.02));
+  col += spectral(n*0.7+0.52)*pow(n,3.0)*(0.55+0.5*k);
+  float hz = smoothstep(0.03,0.0,abs(uv.y+0.62+0.02*sin(uv.x*2.0+t*0.3)));
+  col += hz*vec3(0.45,0.3,0.6)*(0.25+0.4*k);
+  return col;
+}` },
+    { fn: "scSky", src: `vec3 scSky(vec2 uv, float t, float k){
+  float h = uv.y*0.5+0.5;
+  vec3 col = mix(vec3(0.40,0.20,0.50), vec3(0.08,0.20,0.50), smoothstep(-0.25,1.0,h));
+  col = mix(col, vec3(0.96,0.70,0.40), pow(max(0.0,1.0-h),3.0)*0.85);
+  vec2 sp = vec2(0.16,-0.28);
+  float sd = length(uv-sp);
+  col += vec3(1.0,0.86,0.58)*exp(-sd*4.2)*(0.85+0.4*u_pulse);
+  for(int i=0;i<3;i++){
+    float fi=float(i);
+    vec2 q = uv*vec2(1.0,1.9)*(0.85+fi*0.65) + vec2(t*(0.028+fi*0.024), -fi*1.3 - t*0.008);
+    float c = smoothstep(0.42-fi*0.045, 0.80, fbm(q*1.6));
+    vec3 cc = mix(vec3(0.97,0.80,0.64), vec3(0.52,0.48,0.72), fi*0.5);
+    col = mix(col, cc, c*(0.68-fi*0.13));
+  }
+  float ang = atan(uv.y-sp.y, uv.x-sp.x);
+  float ray = pow(0.5+0.5*sin(ang*14.0 + t*0.22), 3.0);
+  col += vec3(1.0,0.92,0.72)*ray*exp(-sd*1.25)*0.24*(0.55+0.7*u_pulse);
+  col *= 1.0 - 0.3*smoothstep(0.6,1.5,length(uv));
+  return col;
+}` },
+    { fn: "scPrism", src: `vec3 scPrism(vec2 uv, float t, float k){
+  vec3 col = vec3(0.008,0.008,0.016);
+  vec2 p = uv/(1.0+0.05*sin(t*0.6)+0.05*u_pulse);
+  p *= rot(sin(t*0.14)*0.07);
+  float r=0.42;
+  vec2 A=vec2(0.0,r), B=vec2(-r*0.866,-r*0.5), C=vec2(r*0.866,-r*0.5);
+  float tri = seg(p,A,B,0.007)+seg(p,B,C,0.007)+seg(p,C,A,0.007);
+  col += tri*vec3(0.8,0.82,0.95)*(0.6+0.8*k);
+  float bm = seg(p, vec2(-2.2,-0.08), vec2(-0.14,-0.08), 0.0045);
+  col += bm*vec3(1.0,0.98,0.95)*(0.7+0.6*u_pulse);
+  for(int i=0;i<7;i++){
+    float fi=float(i)/6.0;
+    float ang = -0.10 - fi*0.33 + 0.02*sin(t*0.8+fi*5.0);
+    vec2 d = vec2(cos(ang), sin(ang));
+    vec2 s0 = vec2(0.12,-0.16);
+    float w = 0.0042 + 0.0022*sin(t*1.6+fi*6.2) + 0.003*u_pulse;
+    col += seg(p, s0, s0+d*2.6, w)*spectral(fi*0.82)*1.35*smoothstep(0.0,0.35,k);
+  }
+  col += spectral(fract(p.x*0.28+t*0.04))*0.05*exp(-length(p)*1.1);
+  return col;
+}` },
+    { fn: "scStorm", src: `vec3 scStorm(vec2 uv, float t, float k){
+  vec2 p = rot(sin(t*0.18)*0.3)*(uv*1.3);
+  float d = fbm(p*2.0 + vec2(t*0.24,-t*0.15));
+  float e = fbm(p*3.4 - vec2(t*0.38, t*0.2) + d*2.0);
+  float ridge = pow(1.0 - abs(e*2.0-1.0), 6.0 - 3.0*u_pulse);
+  vec3 col = mix(vec3(0.015,0.01,0.045), vec3(0.22,0.05,0.34), d);
+  col += spectral(0.62 + e*0.26)*ridge*1.55;
+  float bolt = pow(max(0.0, 1.0 - abs(uv.x*1.7 + sin(uv.y*4.0+t*1.1)*0.55)), 18.0);
+  col += vec3(0.88,0.84,1.0)*bolt*u_pulse*1.25;
+  col *= 0.5 + 0.8*smoothstep(0.08,0.8,d);
+  col *= 1.0 - 0.45*smoothstep(0.5,1.45,length(uv));
+  return col;
+}` },
+    { fn: "scCity", src: `vec3 scCity(vec2 uv, float t, float k){
+  vec3 col = mix(vec3(0.015,0.015,0.06), vec3(0.24,0.07,0.30), smoothstep(-1.0,0.7,uv.y));
+  col += spectral(0.08+uv.y*0.12)*pow(max(0.0,0.5-abs(uv.y+0.45)),2.0)*0.5;
+  for(int i=0;i<3;i++){
+    float fi=float(i);
+    float x = uv.x + t*(0.05+fi*0.045);
+    float bw = 0.17 - fi*0.038;
+    float idx = floor(x/bw);
+    float hgt = -0.58 + fi*0.17 + hash21(vec2(idx, fi*11.3))*(0.58-fi*0.13);
+    float inB = step(uv.y, hgt);
+    vec3 bc = mix(vec3(0.025,0.02,0.055), vec3(0.09,0.05,0.14), fi*0.5);
+    vec2 wg = vec2(x/bw*5.0, (uv.y+1.0)*13.0);
+    vec2 wc = fract(wg);
+    float lit = step(0.70, hash21(floor(wg) + fi*31.7));
+    float win = step(0.22,wc.x)*step(wc.x,0.78)*step(0.28,wc.y)*step(wc.y,0.72)*lit;
+    vec3 wcol = mix(vec3(1.0,0.80,0.42), vec3(0.58,0.86,1.0), hash21(vec2(idx,fi+3.0)));
+    col = mix(col, bc + wcol*win*(0.75+0.7*u_pulse), inB);
+  }
+  for(int j=0;j<2;j++){
+    float fj=float(j);
+    float band = smoothstep(0.024,0.0,abs(uv.y + 0.84 - fj*0.11));
+    float stream = fract(uv.x*0.5 - t*(0.38+fj*0.26));
+    col += band*mix(vec3(1.0,0.74,0.34), vec3(1.0,0.28,0.30), fj)*pow(stream,6.0)*2.3;
+    col += band*vec3(0.26,0.18,0.14);
+  }
+  return col;
+}` },
+    { fn: "scOil", src: `vec3 scOil(vec2 uv, float t, float k){
+  vec2 p = uv*1.7;
+  for(int i=0;i<4;i++){
+    float fi=float(i);
+    p += 0.58*vec2(sin(p.y*1.7+t*0.33+fi), cos(p.x*1.5-t*0.29+fi));
+    p = rot(0.19)*p;
+  }
+  float v = fbm(p*0.6 + t*0.05);
+  float w = fbm(p*0.95 - t*0.04 + 5.2);
+  vec3 col = spectral(v*1.25 + w*0.5 + t*0.03);
+  col *= 0.5 + 0.8*smoothstep(0.18,0.9,v);
+  col += vec3(1.0)*pow(smoothstep(0.72,1.0,w),6.0)*(0.5+0.6*u_pulse);
+  col *= 1.0 - 0.55*smoothstep(0.45,1.35,length(uv));
+  return col;
+}` },
+    { fn: "scMandala", src: `vec3 scMandala(vec2 uv, float t, float k){
+  float r = length(uv);
+  float a = atan(uv.y, uv.x);
+  float s = 3.14159265/6.0;
+  a = mod(a + t*0.06, s*2.0);
+  a = abs(a - s);
+  vec2 p = rot(t*0.05)*(vec2(cos(a),sin(a))*r);
+  float f = fbm(p*4.2 + vec2(t*0.1,0.0));
+  float petals = sin(r*22.0 - t*1.15 + f*4.2 + u_pulse*1.4)*0.5+0.5;
+  float sp = sin(a*18.0)*0.5+0.5;
+  vec3 col = spectral(f*0.85 + r*0.5 + t*0.02)*pow(petals,1.9)*(0.35+0.85*sp);
+  col += vec3(1.0,0.95,0.85)*exp(-r*7.0)*0.55;
+  col *= smoothstep(1.3,0.28,r);
+  return col;
+}` },
+    { fn: "scTunnel", src: `vec3 scTunnel(vec2 uv, float t, float k){
+  float r = length(uv);
+  float a = atan(uv.y, uv.x);
+  float z = 1.0/(r+0.09) + t*0.65;
+  float warp = sin(a*8.0 + t*0.8)*0.12 + 0.1*u_pulse;
+  float rings = sin((z+warp)*6.2)*0.5+0.5;
+  vec3 col = spectral(z*0.11 + a*0.07 + t*0.04)*pow(rings,2.2);
+  col *= smoothstep(0.0,0.22,r);
+  col += vec3(1.0,0.92,0.82)*exp(-r*(9.0-3.0*u_pulse))*0.85;
+  col *= 1.0/(1.0+r*r*0.75);
+  return col;
+}` },
+    { fn: "scEclipse", src: `vec3 scEclipse(vec2 uv, float t, float k){
+  float r = length(uv);
+  float a = atan(uv.y, uv.x);
+  float R = 0.33 + 0.012*sin(t*0.9) + 0.02*u_pulse;
+  if(r < R) return vec3(0.0);
+  float corona = exp(-(r-R)*4.6)*(0.55+0.55*fbm(vec2(a*3.0, t*0.3)));
+  vec3 col = spectral(0.07 + (r-R)*0.55 + t*0.012)*corona*1.3;
+  col += vec3(1.0,0.88,0.62)*smoothstep(0.022,0.0,r-R)*1.6;
+  float rip = sin(r*17.0 - t*2.0)*0.5+0.5;
+  col += spectral(r*0.4+t*0.05)*pow(rip,4.0)*0.28*smoothstep(R,1.1,r);
+  return col;
+}` },
+    { fn: "scCollapse", src: `vec3 scCollapse(vec2 uv, float t, float k){
+  vec2 p = uv*(1.0 + k*5.0);
+  float r = length(p);
+  float a = atan(p.y, p.x);
+  float sw = sin(a*3.0 + 1.0/(r+0.06) - t*1.6)*0.5+0.5;
+  vec3 col = spectral(r*0.3 + t*0.05)*pow(sw,3.0);
+  col += vec3(1.0,0.95,0.9)*exp(-r*(5.0+k*22.0));
+  col *= (1.0 - k*0.92);
+  return col;
+}` },
+  ];
+
+  var COSMOS_GLSL = `vec3 cosmos(vec2 uv, float t){
+  vec3 col = vec3(0.0);
+  for(int i=0;i<4;i++){
+    float fi=float(i);
+    vec2 p = rot(fi*1.7 + t*0.02)*uv*(3.0+fi*2.4);
+    p.y += t*(0.05+fi*0.04);
+    vec2 g = floor(p*6.0);
+    float h = hash21(g + fi*53.1);
+    float tw = 0.45+0.55*sin(t*3.0 + h*53.0);
+    col += smoothstep(0.095,0.0,length(fract(p*6.0)-0.5))*step(0.960,h)*tw*mix(vec3(0.68,0.84,1.0),vec3(1.0,0.80,0.68),h)*0.95;
+  }
+  vec2 q = uv*1.1;
+  q += 0.42*vec2(fbm(q*1.3 + t*0.05), fbm(q*1.3 - t*0.04 + 7.0));
+  float n = fbm(q*1.7 + t*0.03);
+  col += spectral(n*0.9 + t*0.02)*pow(n,3.2)*0.95;
+  float sct = fract(t*0.085);
+  vec2 sp = vec2(-1.3,1.0) + vec2(2.8,-2.05)*sct;
+  float str = smoothstep(0.013,0.0,abs(dot(uv-sp, vec2(0.591,0.807))))*smoothstep(0.32,0.0,length(uv-sp));
+  col += vec3(1.0,0.95,0.86)*str*smoothstep(0.0,0.08,sct)*smoothstep(1.0,0.88,sct)*1.5;
+  float sw = atan(uv.y,uv.x) + 2.4*length(uv) - t*0.18;
+  col += spectral(0.58 + length(uv)*0.3)*pow(0.5+0.5*sin(sw*2.0),8.0)*exp(-length(uv)*1.5)*0.45;
+  return col;
+}`;
+
+  var SCENE_MAIN = `
+void main(){
+  vec2 uv = (gl_FragCoord.xy*2.0 - u_res)/u_res.y;
+  uv *= 1.0 + u_shake + 0.05*sin(u_t*0.33) + 0.025*sin(u_t*0.71);
+  uv = rot(0.07*sin(u_t*0.19) + u_shake*0.9)*uv;
+  gl_FragColor = vec4(max(FNAME(uv, u_t, u_k), 0.0), u_alpha);
+}`;
+
+  var RING_FS = `#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+uniform vec2 u_res;
+uniform float u_t;
+uniform float u_beat;
+uniform float u_level;
+uniform float u_amt;
+uniform sampler2D u_spec;
+vec3 spectral(float t){ return 0.5+0.5*cos(6.28318*(t+vec3(0.0,0.33,0.67))); }
+void main(){
+  vec2 uv = (gl_FragCoord.xy*2.0 - u_res)/u_res.y;
+  float r = length(uv);
+  float a = atan(uv.y, uv.x);
+  float f = abs(a)/3.14159265;
+  float amp = texture2D(u_spec, vec2(clamp(f,0.0,1.0), 0.5)).r;
+  amp = pow(amp, 1.3);
+  float R0 = 0.545 + 0.025*u_beat + 0.015*u_level;
+  float h = amp*0.17;
+  float d = abs(r - R0 - h*0.5) - h*0.5;
+  float bar = smoothstep(0.014, 0.0, d);
+  vec3 col = spectral(f*0.75 + u_t*0.03)*bar*(0.55 + 1.25*amp);
+  col += spectral(0.12 + u_t*0.05)*smoothstep(0.0055, 0.0, abs(r - R0))*(0.30 + 0.5*u_beat);
+  gl_FragColor = vec4(max(col, 0.0)*u_amt, 1.0);
+}`;
+
+  function sceneFS(i){
+    return GLSL_HEAD + "\n" + SCENE_GLSL[i].src + SCENE_MAIN.replace("FNAME", SCENE_GLSL[i].fn);
+  }
+  function cosmosFS(){
+    return GLSL_HEAD + "\n" + COSMOS_GLSL + `
+void main(){
+  vec2 uv = (gl_FragCoord.xy*2.0 - u_res)/u_res.y;
+  uv *= 1.0 + u_shake + 0.05*sin(u_t*0.33) + 0.025*sin(u_t*0.71);
+  uv = rot(0.07*sin(u_t*0.19) + u_shake*0.9)*uv;
+  gl_FragColor = vec4(max(cosmos(uv, u_t)*u_cosmic, 0.0), 1.0);
+}`;
+  }
+
+
+  var POST_FS = [
+    "#ifdef GL_FRAGMENT_PRECISION_HIGH",
+    "precision highp float;",
+    "#else",
+    "precision mediump float;",
+    "#endif",
+    "uniform sampler2D u_tex;",
+    "uniform vec2 u_res;",
+    "uniform float u_t;",
+    "uniform float u_pulse;",
+    "uniform sampler2D u_vid;",
+    "uniform float u_vidMix;",
+    "uniform float u_vidWarp;",
+    "uniform vec2 u_vidScale;",
+    "uniform float u_mirror;",
+    "uniform vec2 u_win;",
+    "uniform float u_gain;",
+    "uniform float u_air;",
+    "uniform float u_beat;",
+    "uniform float u_level;",
+    "vec3 spectral(float t){ return 0.5+0.5*cos(6.28318*(t+vec3(0.0,0.33,0.67))); }",
+    "varying vec2 vUv;",
+    "float h21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }",
+    "float nz(vec2 p){",
+    "  vec2 i=floor(p), f=fract(p); vec2 u=f*f*(3.0-2.0*f);",
+    "  return mix(mix(h21(i),h21(i+vec2(1.0,0.0)),u.x), mix(h21(i+vec2(0.0,1.0)),h21(i+vec2(1.0,1.0)),u.x), u.y);",
+    "}",
+    "void main(){",
+    "  vec2 c = vUv - 0.5;",
+    "  float r2 = dot(c,c);",
+    "  vec2 uv = 0.5 + c*(1.0 + 0.11*r2 + 0.05*u_pulse*r2);",
+    "  if(uv.x<0.0||uv.x>1.0||uv.y<0.0||uv.y>1.0){ gl_FragColor=vec4(0.0,0.0,0.0,1.0); return; }",
+    "  float amt = 0.004 + 0.022*u_pulse;",
+    "  vec3 col;",
+    "  col.r = texture2D(u_tex, uv + c*amt).r;",
+    "  col.g = texture2D(u_tex, uv).g;",
+    "  col.b = texture2D(u_tex, uv - c*amt).b;",
+    "  vec3 bl = vec3(0.0);",
+    "  for(int i=0;i<8;i++){",
+    "    float a = float(i)*0.7853981;",
+    "    bl += texture2D(u_tex, uv + vec2(cos(a),sin(a))*0.013).rgb;",
+    "  }",
+    "  bl /= 8.0;",
+    "  col += pow(max(bl - 0.34, 0.0), vec3(1.2))*1.15;",
+    "  if(u_vidMix > 0.002){",
+    "    vec2 q = vec2(c.x*u_win.x, c.y);",                 /* isotropic: a true circle */
+    "    float R = u_win.y*(0.86 + 0.14*u_vidMix)*(1.0 + 0.035*u_beat);",
+    "    float rr = length(q);",
+    "    vec2 vu = q/(2.0*R) + 0.5;",
+    "    vu = (vu - 0.5)*(1.0 - 0.09*(1.0 - clamp(rr/R, 0.0, 1.0))) + 0.5;",  /* curved screen */
+    "    vu = (vu - 0.5)*u_vidScale + 0.5;",
+    "    if(u_mirror > 0.5) vu.x = abs(vu.x*2.0 - 1.0);",
+    "    float wp = 0.012 + 0.10*u_vidWarp*u_vidWarp;",
+    "    vu += (vec2(nz(uv*3.0 + u_t*0.2), nz(uv*3.0 - u_t*0.17 + 9.0)) - 0.5)*wp;",
+    "    vec3 v = texture2D(u_vid, clamp(vu, 0.0, 1.0)).rgb;",
+    "    v = mix(vec3(dot(v, vec3(0.299,0.587,0.114))), v, 0.74);",
+    "    v = pow(max(v, 0.0), vec3(1.12))*1.10;",
+    "    v *= 1.0 - 0.07*sin(gl_FragCoord.y*2.1);",          /* projector scan */
+    "    v *= 1.0 - 0.42*pow(clamp(rr/R, 0.0, 1.0), 3.0);",  /* light falls off to the rim */
+    "    float sd = rr - R;",
+    "    float feather = 0.014 + 0.13*u_vidWarp;",
+    "    float ero = 0.075*u_vidWarp*nz(uv*6.0 - u_t*0.5);",
+    "    float mask = smoothstep(feather, -feather*0.8, sd + ero);",
+    "    v = mix(v, (v + col)*0.5, u_vidWarp*0.65);",
+    "    vec3 scr = 1.0 - (1.0-col)*(1.0 - v*0.95);",
+    "    col = mix(col, scr, u_vidMix*mask);",
+    "    col += spectral(u_t*0.05)*smoothstep(0.011, 0.0, abs(sd))*u_vidMix*(0.55 + 0.70*u_beat);",
+    "    col += spectral(0.10 + u_t*0.03)*exp(-max(sd, 0.0)*11.0)*u_vidMix*0.30;",
+    "    float ba = atan(q.y, q.x);",
+    "    float beams = pow(0.5 + 0.5*sin(ba*7.0 + u_t*0.22), 14.0);",
+    "    col += spectral(0.45 + u_t*0.04)*beams*smoothstep(R*0.95, R*3.2, rr)*u_vidMix*0.32;",
+    "  }",
+    "  col += spectral(u_t*0.02)*u_air*0.22;",
+    "  col *= u_gain;",
+    "  float g = fract(sin(dot(gl_FragCoord.xy + u_t*61.0, vec2(12.9898,78.233)))*43758.5453);",
+    "  col += (g-0.5)*0.045;",
+    "  col *= 1.0 - 0.05*sin(gl_FragCoord.y*1.7);",
+    "  col *= mix(1.0, smoothstep(1.05,0.25,length(c)*1.25), 0.85);",
+    "  gl_FragColor = vec4(col, 1.0);",
+    "}"
+  ].join("\n");
+
+  /* ============ dom ============ */
+  var $ = function(id){ return document.getElementById(id); };
+  var setup=$("setup"), frameEl=$("frame"), cv=$("gl"), hud=$("hud"),
+      titleBlock=$("titleBlock"), songTitle=$("songTitle"), songSub=$("songSub"),
+      cueEl=$("cue"), blackout=$("blackout"), barFill=$("barFill"),
+      clockEl=$("clock"), sceneEl=$("scene"), aud=$("aud"), errEl=$("err");
+
+  /* ============ error reporting ============ */
+  /* the artifact sandbox collapses everything to "Script error.", so report in-page */
+  function silence(pr){ if(pr && pr.catch) pr.catch(function(){}); return pr; }
+
+  function fail(msg){
+    var box = document.getElementById("crash");
+    if(!box) return;
+    box.textContent = String(msg);
+    box.style.display = "block";
+  }
+  window.addEventListener("error", function(e){
+    fail((e.message || "Error") + (e.lineno ? "  (line " + e.lineno + ":" + (e.colno||0) + ")" : ""));
+  });
+  window.addEventListener("unhandledrejection", function(e){
+    var r = e.reason;
+    fail("Promise rejected: " + ((r && r.message) ? r.message : String(r)));
+  });
+
+  /* ============ webgl ============ */
+  var gl=null, progScenes=null, progCosmos=null, progRing=null, progPost=null;
+  var fbo=null, fboTex=null, quad=null;
+  var fbW=0, fbH=0, vidTex=null, specTex=null, lastUpload=null;
+
+  function compile(src, type){
+    var s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)){
+      var log = gl.getShaderInfoLog(s) || "shader failed";
+      throw new Error(log.split("\n").slice(0,3).join(" "));
+    }
+    return s;
+  }
+  function program(fs, tag){
+    var p = gl.createProgram();
+    gl.attachShader(p, compile(VERT, gl.VERTEX_SHADER));
+    gl.attachShader(p, compile(fs, gl.FRAGMENT_SHADER));
+    gl.bindAttribLocation(p, 0, "a_pos");
+    gl.linkProgram(p);
+    if(!gl.getProgramParameter(p, gl.LINK_STATUS)){
+      throw new Error("link " + (tag || "") + ": " + (gl.getProgramInfoLog(p) || "failed"));
+    }
+    p.u = {};
+    var n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+    for(var i=0;i<n;i++){
+      var nm = gl.getActiveUniform(p, i).name;
+      p.u[nm] = gl.getUniformLocation(p, nm);
+    }
+    return p;
+  }
+  function initGL(){
+    try{ initGLInner(); }
+    catch(e){ gl = null; progScenes = null; progCosmos = null; progPost = null; throw e; }
+  }
+  function initGLInner(){
+    gl = cv.getContext("webgl", {antialias:false, alpha:false, preserveDrawingBuffer:false})
+      || cv.getContext("experimental-webgl", {antialias:false, alpha:false});
+    if(!gl) throw new Error("This browser can't start WebGL. Try Chrome, Edge or Safari with hardware acceleration on.");
+    progScenes = [];
+    for(var si=0; si<SCENE_GLSL.length; si++){
+      progScenes.push(program(sceneFS(si), SCENE_GLSL[si].fn));
+    }
+    progCosmos = program(cosmosFS(), "cosmos");
+    progRing   = program(RING_FS, "ring");
+    progPost   = program(POST_FS, "post");
+    quad = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    specTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, specTex);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,SPEC_N,1,0,gl.RGBA,gl.UNSIGNED_BYTE,specData);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    vidTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, vidTex);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([0,0,0,255]));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  }
+  function u1f(p, n, v){ var l = p.u[n]; if(l) gl.uniform1f(l, v); }
+  function u2f(p, n, a, b){ var l = p.u[n]; if(l) gl.uniform2f(l, a, b); }
+  function u1i(p, n, v){ var l = p.u[n]; if(l) gl.uniform1i(l, v); }
+
+  function makeTarget(w,h){
+    if(fboTex) gl.deleteTexture(fboTex);
+    if(fbo) gl.deleteFramebuffer(fbo);
+    fboTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, fboTex);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fboTex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    fbW=w; fbH=h;
+  }
+
+  /* ============ layout ============ */
+  var aspect = 0.5625;
+  function layout(){
+    var vw = window.innerWidth, vh = window.innerHeight, w, h;
+    if(aspect <= 0){ w=vw; h=vh; }
+    else {
+      w = vw; h = Math.round(w/aspect);
+      if(h > vh){ h = vh; w = Math.round(h*aspect); }
+    }
+    frameEl.style.width = w+"px";
+    frameEl.style.height = h+"px";
+    frameEl.style.setProperty("--fw", w+"px");
+    var dpr = Math.min(window.devicePixelRatio||1, 2);
+    var bw = Math.min(Math.round(w*dpr), 1920);
+    var bh = Math.round(bw * (h/w));
+    if(bw !== cv.width || bh !== cv.height){
+      cv.width = bw; cv.height = bh;
+      if(gl) makeTarget(bw, bh);
+    }
+  }
+  window.addEventListener("resize", layout);
+
+  /* ============ audio ============ */
+  var actx=null, analyser=null, freq=null, hasAudio=false;
+  function wireAudio(){
+    if(actx || !hasAudio) return;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return;
+    /* if this fails the song still plays, it just stops driving the visuals */
+    try{
+      actx = new AC();
+      if(actx.resume) silence(actx.resume());   /* async — do NOT judge the state yet */
+      var src = actx.createMediaElementSource(aud);
+      analyser = actx.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.78;
+      src.connect(analyser);
+      analyser.connect(actx.destination);
+      freq = new Uint8Array(analyser.frequencyBinCount);
+    }catch(e){
+      analyser = null; freq = null;
+    }
+  }
+  var SPEC_N = 64;
+  var specData = new Uint8Array(SPEC_N*4);
+  var react = 1.0, bpm = 86, showRing = true;
+  var lowHist = [], lastBeat = -9, beatEnv = 0;
+
+  function analyse(t){
+    var out = { low:0, mid:0, high:0, level:0 }, i, k;
+    if(analyser && freq){
+      analyser.getByteFrequencyData(freq);
+      var n = freq.length, sum = 0;
+      for(i=1;i<10;i++)    out.low  += freq[i];
+      for(i=10;i<90;i++)   out.mid  += freq[i];
+      for(i=90;i<300;i++)  out.high += freq[i];
+      for(i=0;i<n;i++)     sum += freq[i];
+      out.low  /= (9*255);
+      out.mid  /= (80*255);
+      out.high /= (210*255);
+      out.level = sum/(n*255);
+      for(i=0;i<SPEC_N;i++){
+        var a = Math.floor(Math.pow(i/SPEC_N, 2)*n*0.6) + 1;
+        var b = Math.max(a + 1, Math.floor(Math.pow((i+1)/SPEC_N, 2)*n*0.6) + 1);
+        var m = 0, c = 0;
+        for(k=a; k<b && k<n; k++){ m += freq[k]; c++; }
+        var v = c ? (m/c) : 0;
+        specData[i*4] = v; specData[i*4+1] = v; specData[i*4+2] = v; specData[i*4+3] = 255;
+      }
+    } else {
+      /* no analyser (iOS often refuses) — drive everything from the stated tempo */
+      var ph = (t*bpm/60) % 1, kk = Math.pow(1 - ph, 3);
+      out.low   = kk*0.9;
+      out.mid   = 0.34 + 0.22*Math.sin(t*1.7) + kk*0.2;
+      out.high  = 0.30 + 0.20*Math.sin(t*0.9 + 1.0);
+      out.level = 0.40 + 0.30*kk;
+      for(i=0;i<SPEC_N;i++){
+        var f = i/(SPEC_N - 1);
+        var vv = (1 - f*0.8)*(0.45 + 0.55*Math.sin(t*2.0 + f*9.0))*(0.4 + 0.6*kk)*255;
+        vv = Math.max(0, Math.min(255, vv));
+        specData[i*4] = vv; specData[i*4+1] = vv; specData[i*4+2] = vv; specData[i*4+3] = 255;
+      }
+    }
+    return out;
+  }
+
+  /* an onset is a bass spike well above its own recent average */
+  function detectBeat(low, t){
+    lowHist.push(low);
+    if(lowHist.length > 43) lowHist.shift();
+    var avg = 0, i;
+    for(i=0;i<lowHist.length;i++) avg += lowHist[i];
+    avg /= Math.max(1, lowHist.length);
+    var hit = analyser
+      ? (lowHist.length > 12 && low > avg*1.32 && low > 0.10 && (t - lastBeat) > 0.20)
+      : (((t*bpm/60) % 1) < ((lastBeat*bpm/60) % 1) || t - lastBeat > 60/bpm);
+    if(hit) lastBeat = t;
+    return hit;
+  }
+
+  /* ============ timeline ============ */
+  var total = BASE_TOTAL, scale = 1, cues = [], playing=false, startedAt=0, pausedAt=0;
+
+  /* lucid dreams: the user's own clips surfacing through the light */
+  var CARD_R = 0.25, CARD_AR = 1.0;   // circular screen: radius in half-frame-height units
+  var cosmic = 0.6;
+  var clips = [], dreams = [], mirrorDreams = true;
+  var MAX_MEDIA = 12, MEDIA_LEN = 6, MEDIA_FADE = 1.8;
+
+  /* spread every item evenly across the whole running time */
+  function buildDreams(){
+    dreams = [];
+    var n = clips.length;
+    if(!n) return;
+    var a = total*0.055, b = total*0.955 - MEDIA_LEN;
+    if(b < a) b = a;
+    var step = (n > 1) ? (b - a)/(n - 1) : 0;
+    for(var i=0;i<n;i++){
+      dreams.push({ t0: (n > 1) ? a + step*i : (total - MEDIA_LEN)*0.5, clip: clips[i] });
+    }
+  }
+  function dreamMix(t){
+    for(var i=0;i<dreams.length;i++){
+      var d = dreams[i], e = t - d.t0;
+      if(e < 0 || e > MEDIA_LEN) continue;
+      var f = Math.min(e/MEDIA_FADE, (MEDIA_LEN - e)/MEDIA_FADE, 1);
+      f = Math.max(0, Math.min(1, f));
+      f = f*f*(3 - 2*f);
+      return { clip: d.clip, mix: f, k: e/MEDIA_LEN };
+    }
+    return null;
+  }
+
+  function buildTimeline(){
+    var sum=0, i;
+    for(i=0;i<SCENES.length;i++) sum += SCENES[i].dur;
+    scale = total / sum;
+    var acc=0;
+    for(i=0;i<SCENES.length;i++){
+      SCENES[i].start = acc;
+      SCENES[i].len = SCENES[i].dur*scale;
+      acc += SCENES[i].len;
+    }
+  }
+  function parseCues(raw){
+    var lines = raw.split("\n"), out=[], i, m;
+    for(i=0;i<lines.length;i++){
+      var L = lines[i].trim();
+      if(!L) continue;
+      m = L.match(/^(\d+):([0-5]?\d)\s*\|\s*(.+)$/);
+      if(m) out.push({ t: parseInt(m[1],10)*60 + parseInt(m[2],10), text: m[3].trim() });
+      else out.push({ t: null, text: L.replace(/^\|\s*/,"") });
+    }
+    var untimed = out.filter(function(c){ return c.t===null; });
+    if(untimed.length){
+      var a = total*0.22, b = total*0.88, step = (b-a)/Math.max(untimed.length,1);
+      untimed.forEach(function(c,ix){ c.t = a + step*ix; });
+    }
+    out.sort(function(x,y){ return x.t - y.t; });
+    return out;
+  }
+  function now(){
+    if(!playing) return pausedAt;
+    var wall = (performance.now() - startedAt)/1000;
+    /* follow the track only while it is actually advancing — never freeze on it */
+    if(hasAudio && !aud.paused && aud.currentTime > 0.05) return aud.currentTime;
+    return wall;
+  }
+  function fmt(s){
+    s = Math.max(0, Math.floor(s));
+    return Math.floor(s/60)+":"+("0"+(s%60)).slice(-2);
+  }
+
+  /* ============ render ============ */
+  var pulse=0, air=0, mid=0, level=0;
+
+  var crashed = false;
+  function render(){
+    requestAnimationFrame(render);
+    if(setup.classList.contains("gone") === false || crashed) return;
+    try{ draw(); }
+    catch(err){
+      crashed = true;
+      fail("Draw stopped: " + ((err && err.message) ? err.message : String(err)));
+    }
+  }
+
+  function drawScene(i, k, alpha, t, shake, breath){
+    var pr = progScenes[i | 0];
+    if(!pr) return;
+    gl.useProgram(pr);
+    u2f(pr, "u_res", fbW, fbH);
+    u1f(pr, "u_t", t);
+    u1f(pr, "u_k", k);
+    u1f(pr, "u_alpha", alpha);
+    u1f(pr, "u_pulse", breath);
+    u1f(pr, "u_shake", shake);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  function draw(){
+    if(!gl || !progScenes || !progPost) return;
+    var t = Math.min(now(), total);
+    var b = analyse(t);
+    if(detectBeat(b.low, t)) beatEnv = 1;
+    beatEnv *= 0.86;
+    if(beatEnv < 0.001) beatEnv = 0;
+
+    var targetPulse = Math.min(1.4, Math.pow(b.low, 1.4)*2.0*react);
+    var targetAir   = Math.min(1.2, b.high*1.7*react);
+    var targetMid   = Math.min(1.2, b.mid*1.6*react);
+    pulse += (targetPulse - pulse)*0.30;
+    air   += (targetAir - air)*0.10;
+    mid   += (targetMid - mid)*0.18;
+    level += (b.level*react - level)*0.08;
+
+    /* scene selection */
+    var iA=SCENES.length-1, kA=1, iB=iA, kB=1, blend=0, bl=BLEND*scale, i;
+    for(i=0;i<SCENES.length;i++){
+      var s=SCENES[i];
+      if(t < s.start + s.len || i===SCENES.length-1){
+        iA = i;
+        kA = Math.min(1, Math.max(0, (t - s.start)/s.len));
+        var into = (s.start + s.len) - t;
+        if(i < SCENES.length-1 && into < bl){
+          iB = i+1;
+          blend = (bl - into)/bl;
+          blend = blend*blend*(3-2*blend);
+          kB = Math.max(0, (t - SCENES[i+1].start)/SCENES[i+1].len);
+        }
+        break;
+      }
+    }
+    if(blend === 0){ iB = iA; kB = kA; }
+
+    var fadeIn = Math.min(1, t/2.5);
+    var fadeOut = Math.min(1, Math.max(0,(total - t))/5.0);
+    var gain = fadeIn*fadeOut;
+
+    /* pass 1 — base scene, then the next scene blended over it, then cosmos added */
+    /* background answers only to the scene change, never to the beat */
+    var breath = 0.12*(0.5 + 0.5*Math.sin(t*0.22));
+    var shake = 0.05*blend*(1 - blend)*4;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.viewport(0, 0, fbW, fbH);
+    gl.disable(gl.BLEND);
+    drawScene(iA, kA, 1, t, shake, breath);
+    if(blend > 0.001){
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      drawScene(iB, kB, blend, t, shake, breath);
+      gl.disable(gl.BLEND);
+    }
+    if(cosmic > 0.01){
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.useProgram(progCosmos);
+      u2f(progCosmos, "u_res", fbW, fbH);
+      u1f(progCosmos, "u_t", t);
+      u1f(progCosmos, "u_pulse", breath);
+      u1f(progCosmos, "u_shake", shake);
+      u1f(progCosmos, "u_cosmic", cosmic);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      gl.disable(gl.BLEND);
+    }
+
+    /* spectrum ring — the music drawn directly, into the same buffer */
+    if(showRing && react > 0.01){
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, specTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SPEC_N, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, specData);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.useProgram(progRing);
+      u2f(progRing, "u_res", fbW, fbH);
+      u1f(progRing, "u_t", t);
+      u1f(progRing, "u_beat", beatEnv);
+      u1f(progRing, "u_level", level);
+      u1f(progRing, "u_amt", Math.min(1, react));
+      u1i(progRing, "u_spec", 2);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      gl.disable(gl.BLEND);
+      gl.activeTexture(gl.TEXTURE0);
+    }
+
+    /* lucid dream media — video or photo */
+    var dm = dreamMix(t), vmix = 0, vwarp = 0, vsx = 1, vsy = 1;
+    for(var ci=0; ci<clips.length; ci++){
+      if(clips[ci].kind !== "video") continue;
+      var el = clips[ci].el, want = (dm && dm.clip === clips[ci]);
+      if(want && el.paused){ try{ el.currentTime = 0; silence(el.play()); }catch(e){} }
+      else if(!want && !el.paused){ el.pause(); }
+    }
+    if(dm){
+      var it = dm.clip, src = it.el;
+      var ready = (it.kind === "video") ? (src.readyState >= 2)
+                                        : (src.complete && src.naturalWidth > 0);
+      if(ready){
+        var mw = (it.kind === "video") ? src.videoWidth  : src.naturalWidth;
+        var mh = (it.kind === "video") ? src.videoHeight : src.naturalHeight;
+        var ma = mw/Math.max(1, mh);
+        if(ma > CARD_AR){ vsx = CARD_AR/ma; vsy = 1; } else { vsx = 1; vsy = ma/CARD_AR; }
+        var push = 1 - 0.10*dm.k;   /* slow drift inward over the six seconds */
+        vsx *= push; vsy *= push;
+        if(it.kind === "video" || lastUpload !== it){
+          gl.bindTexture(gl.TEXTURE_2D, vidTex);
+          gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+          try{
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+            lastUpload = it;
+          }catch(e){}
+          gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        }
+        if(lastUpload === it){ vmix = dm.mix; vwarp = 1 - dm.mix; }
+      }
+    }
+
+    /* pass 2 */
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0,0,cv.width,cv.height);
+    gl.useProgram(progPost);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, fboTex);
+    u1i(progPost, "u_tex", 0);
+    u2f(progPost, "u_res", cv.width, cv.height);
+    u1f(progPost, "u_t", t);
+    u1f(progPost, "u_pulse", breath);
+    u1f(progPost, "u_vidMix", vmix);
+    u1f(progPost, "u_vidWarp", vwarp);
+    u2f(progPost, "u_vidScale", vsx, vsy);
+    u1f(progPost, "u_mirror", mirrorDreams ? 1 : 0);
+    u1f(progPost, "u_gain", gain);
+    u1f(progPost, "u_air", air);
+    u1f(progPost, "u_beat", beatEnv);
+    u1f(progPost, "u_level", level);
+    u2f(progPost, "u_win", cv.width/cv.height, CARD_R);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, vidTex);
+    u1i(progPost, "u_vid", 1);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    /* overlays */
+    titleBlock.classList.toggle("on", t > 1.5 && t < total*0.065);
+    var active=null;
+    for(i=0;i<cues.length;i++){
+      if(t >= cues[i].t && t < cues[i].t + 6.5) active = cues[i];
+    }
+    if(active){
+      if(cueEl.dataset.k !== String(active.t)){
+        cueEl.dataset.k = String(active.t);
+        cueEl.textContent = active.text;
+      }
+      cueEl.classList.add("on");
+    } else {
+      cueEl.classList.remove("on");
+    }
+    blackout.style.opacity = String(1 - fadeOut);
+
+    barFill.style.width = (100*Math.min(1, t/total))+"%";
+    clockEl.textContent = fmt(t)+" / "+fmt(total);
+    sceneEl.textContent = SCENES[iA].name + (react > 0.01 ? (analyser ? " · live" : " · tempo") : "");
+
+    if(t >= total && playing && !hasAudio){ playing=false; pausedAt=total; }
+  }
+
+  /* ============ controls ============ */
+  var hideTimer=null;
+  function nudgeHud(){
+    if(hud.classList.contains("gone")) return;
+    hud.classList.add("show");
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(function(){ hud.classList.remove("show"); }, 2600);
+  }
+  $("tap").addEventListener("click", function(){
+    hideTap();
+    if(actx && actx.resume) silence(actx.resume());
+    if(hasAudio){ silence(aud.play()); checkAudio(); }
+  });
+  window.addEventListener("mousemove", nudgeHud);
+  window.addEventListener("touchstart", nudgeHud, {passive:true});
+
+  function setPlaying(on){
+    if(on){
+      startedAt = performance.now() - pausedAt*1000;
+      if(hasAudio){
+        if(actx && actx.state === "suspended") silence(actx.resume());
+        silence(aud.play());
+      }
+      playing = true;
+    } else {
+      pausedAt = now();
+      if(hasAudio) aud.pause();
+      playing = false;
+    }
+    $("btnPlay").textContent = on ? "Pause" : "Play";
+  }
+  function restart(){
+    if(hasAudio){ try{ aud.currentTime = 0; }catch(e){} }
+    pausedAt = 0; startedAt = performance.now();
+    setPlaying(true);
+    if(hasAudio) checkAudio();
+  }
+
+  /* if the track never gets going, offer a tap — iOS sometimes needs a second gesture */
+  var audioTimer = null;
+  function checkAudio(){
+    clearTimeout(audioTimer);
+    audioTimer = setTimeout(function(){
+      if(!playing || !hasAudio) return;
+      var ctxOk = !actx || actx.state === "running";
+      if(aud.currentTime > 0.05 && !aud.paused && ctxOk){ hideTap(); return; }
+      if(actx && actx.resume) silence(actx.resume());
+      showTap();
+    }, 1800);
+  }
+  function showTap(){ $("tap").style.display = "flex"; }
+  function hideTap(){ $("tap").style.display = "none"; }
+  $("btnPlay").addEventListener("click", function(){ setPlaying(!playing); });
+  $("btnRestart").addEventListener("click", restart);
+  function fsSupported(){
+    var d = document.documentElement;
+    if(document.fullscreenEnabled === false) return false;
+    return !!(d.requestFullscreen || d.webkitRequestFullscreen || d.msRequestFullscreen);
+  }
+  function goFullscreen(){
+    /* iOS Safari has no full screen for pages — skip quietly rather than reject */
+    if(!fsSupported()) return;
+    var d = document.documentElement;
+    var req = d.requestFullscreen || d.webkitRequestFullscreen || d.msRequestFullscreen;
+    try{ silence(req.call(d)); }catch(e){}
+  }
+  function exitFullscreen(){
+    var ex = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+    if(!ex) return;
+    try{ silence(ex.call(document)); }catch(e){}
+  }
+  function isFullscreen(){
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+  $("btnFull").addEventListener("click", function(){
+    if(isFullscreen()) exitFullscreen(); else goFullscreen();
+  });
+  document.addEventListener("fullscreenchange", layout);
+  document.addEventListener("webkitfullscreenchange", layout);
+  document.addEventListener("keydown", function(e){
+    if(!setup.classList.contains("gone")) return;
+    var k = e.key.toLowerCase();
+    if(k === " " || e.code === "Space"){ e.preventDefault(); setPlaying(!playing); }
+    else if(k === "r"){ restart(); }
+    else if(k === "h"){ hud.classList.toggle("gone"); }
+    else if(k === "f"){ $("btnFull").click(); }
+    else if(k === "escape"){
+      if(isFullscreen()) return;          /* first Esc just leaves full screen */
+      setPlaying(false); setup.classList.remove("gone");
+    }
+  });
+
+  $("fAudio").addEventListener("change", function(){
+    var f = this.files && this.files[0];
+    if(!f) return;
+    $("fName").textContent = f.name.length > 26 ? f.name.slice(0,24)+"…" : f.name;
+    aud.src = URL.createObjectURL(f);
+    hasAudio = true;
+    aud.addEventListener("loadedmetadata", function(){
+      if(isFinite(aud.duration) && aud.duration > 20){
+        total = aud.duration;
+        $("fLen").disabled = true;
+      }
+    }, {once:true});
+  });
+
+  /* ---------- presets ---------- */
+  var PKEY = "prism.presets.v1", LKEY = "prism.last.v1";
+  function readStore(k){
+    try{ var v = localStorage.getItem(k); return v ? JSON.parse(v) : null; }
+    catch(e){ return null; }
+  }
+  function writeStore(k, o){
+    try{ localStorage.setItem(k, JSON.stringify(o)); return true; }catch(e){ return false; }
+  }
+  function gather(){
+    return {
+      sub: $("fSub").value,
+      count: $("fCount").value,
+      aspect: $("fAspect").value,
+      len: $("fLen").value,
+      cosmic: $("fCosmic").value,
+      mirror: $("fMirror").checked,
+      react: $("fReact").value,
+      ring: $("fRing").checked,
+      bpm: $("fBpm").value
+    };
+  }
+  function applyPreset(o){
+    if(!o || typeof o !== "object") return;
+    if(typeof o.sub === "string") $("fSub").value = o.sub;
+    if(o.count)  $("fCount").value  = o.count;
+    if(o.aspect) $("fAspect").value = o.aspect;
+    if(o.len)    $("fLen").value    = o.len;
+    if(o.cosmic) $("fCosmic").value = o.cosmic;
+    if(typeof o.mirror === "boolean") $("fMirror").checked = o.mirror;
+    if(o.react)  $("fReact").value = o.react;
+    if(o.bpm)    $("fBpm").value   = o.bpm;
+    if(typeof o.ring === "boolean") $("fRing").checked = o.ring;
+  }
+  function refreshPresets(keep){
+    var el = $("fPreset"), all = readStore(PKEY) || {}, names = Object.keys(all).sort();
+    while(el.firstChild) el.removeChild(el.firstChild);
+    var o0 = document.createElement("option");
+    o0.value = "";
+    o0.textContent = names.length ? "Choose a preset" : "No presets saved yet";
+    el.appendChild(o0);
+    names.forEach(function(n){
+      var o = document.createElement("option");
+      o.value = n; o.textContent = n;
+      el.appendChild(o);
+    });
+    el.value = (keep && all[keep]) ? keep : "";
+  }
+  function note(msg){
+    errEl.style.display = msg ? "block" : "none";
+    errEl.textContent = msg || "";
+  }
+
+  $("fPreset").addEventListener("change", function(){
+    if(!this.value) return;
+    var all = readStore(PKEY) || {};
+    applyPreset(all[this.value]);
+    $("fPresetName").value = this.value;
+    note("");
+  });
+  $("pSave").addEventListener("click", function(){
+    var name = $("fPresetName").value.trim() || $("fPreset").value;
+    if(!name){ note("Give the preset a name first."); return; }
+    var all = readStore(PKEY) || {};
+    all[name] = gather();
+    if(!writeStore(PKEY, all)){ note("This browser is blocking local storage, so presets can't be saved."); return; }
+    refreshPresets(name);
+    note("");
+  });
+  $("pDel").addEventListener("click", function(){
+    var name = $("fPreset").value || $("fPresetName").value.trim();
+    var all = readStore(PKEY) || {};
+    if(!name || !all[name]){ note("Pick a saved preset to delete."); return; }
+    delete all[name];
+    writeStore(PKEY, all);
+    $("fPresetName").value = "";
+    refreshPresets();
+    note("");
+  });
+
+  /* distil full lyrics down to the strongest short phrases, in song order */
+  function distil(raw, n){
+    var rows = raw.split(/\n+/), items = [], i;
+    for(i=0;i<rows.length;i++){
+      var L = rows[i]
+        .replace(/\[[^\]]*\]/g, " ")
+        .replace(/\([^)]*\)/g, " ")
+        .replace(/[*_"\u201c\u201d]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/[,;:.!?\-\u2013\u2014]+$/, "")
+        .trim();
+      if(L) items.push(L);
+    }
+    if(!items.length) return [];
+
+    var counts = {};
+    items.forEach(function(L){ var k = L.toLowerCase(); counts[k] = (counts[k]||0) + 1; });
+
+    var FILLER = /^(oh+|ooh+|ah+|aah+|yeah+|yea|na+|la+|mm+|hmm+|hey+|woah+|whoa+|uh+|ay+|do+)$/i;
+    var TAIL = /^(to|the|a|an|of|and|or|but|that|in|on|for|with|my|your|our|i|we|you|it|is|was|be|so)$/i;
+
+    function isFiller(L){
+      var w = L.split(" ");
+      for(var z=0;z<w.length;z++){
+        if(!FILLER.test(w[z].replace(/[^a-z]/gi, ""))) return false;
+      }
+      return true;
+    }
+    function shorten(L){
+      var w = L.split(" ");
+      if(w.length <= 10) return L;
+      var ci = L.indexOf(",");
+      if(ci > 10 && L.slice(0, ci).split(" ").length <= 10) return L.slice(0, ci).trim();
+      var cut = L.search(/\s+(and|but|that|when|where|because|so|while)\s+/i);
+      if(cut > 12 && L.slice(0, cut).split(" ").length <= 10) return L.slice(0, cut).trim();
+      w = w.slice(0, 9);
+      while(w.length > 4 && TAIL.test(w[w.length - 1].replace(/[^a-z]/gi, ""))) w.pop();
+      return w.join(" ");
+    }
+    function score(L){
+      if(isFiller(L)) return -50;
+      var w = L.split(" ").length, sc = 0;
+      sc += Math.min(counts[L.toLowerCase()], 4)*2.2;
+      sc += (w >= 3 && w <= 8) ? 3 : (w <= 2 ? -2.5 : -0.6*(w - 8));
+      if(!/[a-z]/i.test(L)) sc -= 3;
+      if(/\b(i|you|we|me|us|my|your|our)\b/i.test(L)) sc += 1.2;
+      return sc;
+    }
+    function norm(x){ return x.toLowerCase().replace(/[^a-z ]/g, "").replace(/\s+/g," ").trim(); }
+    function clashes(L, list){
+      var a = norm(L);
+      for(var z=0;z<list.length;z++){
+        var b = norm(list[z].t);
+        if(a === b || a.indexOf(b) === 0 || b.indexOf(a) === 0) return true;
+      }
+      return false;
+    }
+
+    n = Math.max(1, Math.min(n, items.length));
+    var out = [], b, j, best, bi, bs, sc2;
+    for(b=0;b<n;b++){
+      var lo = Math.floor(b*items.length/n);
+      var hi = Math.max(lo + 1, Math.floor((b + 1)*items.length/n));
+      best = null; bi = -1; bs = -1e9;
+      for(j=lo;j<hi;j++){
+        if(isFiller(items[j]) || clashes(items[j], out)) continue;
+        sc2 = score(items[j]);
+        if(sc2 > bs){ bs = sc2; best = items[j]; bi = j; }
+      }
+      if(best === null){
+        var mid = (lo + hi)*0.5, cbs = -1e9, sc3;
+        for(j=0;j<items.length;j++){
+          if(isFiller(items[j]) || clashes(items[j], out)) continue;
+          sc3 = score(items[j]) - Math.abs(j - mid)*0.9;
+          if(sc3 > cbs){ cbs = sc3; best = items[j]; bi = j; }
+        }
+      }
+      if(best !== null) out.push({ t: shorten(best), i: bi });
+    }
+    out.sort(function(x, y){ return x.i - y.i; });   /* keep the song's own order */
+    return out.map(function(o){ return o.t; });
+  }
+
+  $("distil").addEventListener("click", function(){
+    var raw = $("fLyrics").value;
+    errEl.style.display = "none";
+    if(!raw.trim()){
+      errEl.style.display = "block";
+      errEl.textContent = "Paste the lyrics first, then press Distil.";
+      return;
+    }
+    var tot = (hasAudio && isFinite(aud.duration) && aud.duration > 20)
+      ? aud.duration : parseFloat($("fLen").value);
+    var sel = $("fCount").value;
+    var n = (sel === "auto") ? Math.max(4, Math.min(12, Math.round(tot/45))) : parseInt(sel, 10);
+    var ph = distil(raw, n);
+    if(!ph.length){
+      errEl.style.display = "block";
+      errEl.textContent = "Couldn't find usable lines in that text.";
+      return;
+    }
+    var a = tot*0.09, b2 = tot*0.93;
+    var step = ph.length > 1 ? (b2 - a)/(ph.length - 1) : 0;
+    $("fCues").value = ph.map(function(txt, ix){
+      var tt = Math.round(ph.length > 1 ? a + step*ix : tot*0.5);
+      return Math.floor(tt/60) + ":" + ("0" + (tt % 60)).slice(-2) + " | " + txt;
+    }).join("\n");
+  });
+
+  $("fClips").addEventListener("change", function(){
+    var all = this.files ? Array.prototype.slice.call(this.files) : [];
+    var fs = all.slice(0, MAX_MEDIA);
+    clips = []; lastUpload = null;
+    fs.forEach(function(f){
+      var isVid = /^video\//.test(f.type);
+      var el;
+      if(isVid){
+        el = document.createElement("video");
+        el.muted = true; el.loop = true; el.playsInline = true;
+        el.setAttribute("playsinline", "");
+        el.preload = "auto";
+        el.src = URL.createObjectURL(f);
+        el.load();
+      } else {
+        el = document.createElement("img");
+        el.decoding = "async";
+        el.src = URL.createObjectURL(f);
+      }
+      clips.push({ el: el, kind: isVid ? "video" : "image", name: f.name });
+    });
+    var n = clips.length;
+    $("cName").textContent = n ? (n + (n === 1 ? " item" : " items") + (all.length > n ? " (max 12)" : "")) : "";
+  });
+
+  $("enter").addEventListener("click", function(){
+    try{
+      aspect = parseFloat($("fAspect").value);
+      if(!hasAudio) total = parseFloat($("fLen").value);
+      buildTimeline();
+      cues = parseCues($("fCues").value);
+      mirrorDreams = $("fMirror").checked;
+      cosmic = parseFloat($("fCosmic").value);
+      react = parseFloat($("fReact").value);
+      showRing = $("fRing").checked;
+      var bv = parseFloat($("fBpm").value);
+      bpm = (isFinite(bv) && bv >= 40 && bv <= 220) ? bv : 86;
+      lowHist = []; lastBeat = -9; beatEnv = 0;
+      writeStore(LKEY, gather());
+      buildDreams();
+      songTitle.textContent = $("fTitle").value || "";
+      var sub = $("fSub").value.trim();
+      songSub.textContent = sub;
+      songSub.style.display = sub ? "" : "none";
+      layout();
+      if(!gl){ initGL(); makeTarget(cv.width, cv.height); }
+      crashed = false;
+      if(!fsSupported()) $("btnFull").style.display = "none";
+      setup.classList.add("gone");
+      goFullscreen();                      /* the click is the gesture the browser needs */
+      layout();
+      setTimeout(layout, 120);             /* re-measure once the window has resized */
+      wireAudio();
+      restart();
+      nudgeHud();
+    } catch(err){
+      var msg = err.message || String(err);
+      errEl.style.display = "block";
+      errEl.textContent = msg;
+      fail("Could not start: " + msg);
+      setup.classList.remove("gone");
+    }
+  });
+
+  applyPreset(readStore(LKEY));
+  refreshPresets();
+  layout();
+  requestAnimationFrame(render);
+})();
+</script>
+</body>
+</html>
