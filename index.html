@@ -286,6 +286,12 @@
       <p class="hint">Six seconds each, in the order you pick them. They melt out of the light and back into it rather than cutting. Sky, cloud, nature and street material works best.</p>
       <div style="margin-top:12px">
         <label for="fScreen">The circular screen</label>
+        <select id="fHold" style="margin-bottom:10px">
+          <option value="spread" selected>Each picture holds for an equal share of the song</option>
+          <option value="8">Change every 8 seconds</option>
+          <option value="12">Change every 12 seconds</option>
+          <option value="20">Change every 20 seconds</option>
+        </select>
         <select id="fScreen">
           <option value="always" selected>Always lit, pictures cycling through it</option>
           <option value="sparse">Appears only when a picture does</option>
@@ -641,15 +647,22 @@ void main(){
   vec2 uv = (gl_FragCoord.xy*2.0 - u_res)/u_res.y;
   float r = length(uv);
   float a = atan(uv.y, uv.x);
-  float f = abs(a)/3.14159265;
-  float amp = texture2D(u_spec, vec2(clamp(f,0.0,1.0), 0.5)).r;
-  amp = pow(amp, 1.3);
+  float TAU = 6.2831853;
+  float N = 72.0;
+  float t01 = (a + 3.1415927)/TAU;
+  float bi = floor(t01*N);
+  float cen = (bi + 0.5)/N;
+  float f = abs(cen*2.0 - 1.0);
+  float amp = pow(texture2D(u_spec, vec2(clamp(f, 0.0, 1.0), 0.5)).r, 1.25);
+  float local = fract(t01*N);
+  float gap = smoothstep(0.10, 0.28, local)*smoothstep(0.90, 0.72, local);
   float R0 = 0.545 + 0.025*u_beat + 0.015*u_level;
-  float h = amp*0.17;
-  float d = abs(r - R0 - h*0.5) - h*0.5;
-  float bar = smoothstep(0.014, 0.0, d);
-  vec3 col = spectral(f*0.75 + u_t*0.03)*bar*(0.55 + 1.25*amp);
-  col += spectral(0.12 + u_t*0.05)*smoothstep(0.0055, 0.0, abs(r - R0))*(0.30 + 0.5*u_beat);
+  float h = 0.020 + amp*0.21;
+  float d = max(R0 - r, r - (R0 + h));
+  float bar = smoothstep(0.009, 0.0, d)*gap;
+  vec3 col = spectral(f*0.75 + u_t*0.03)*bar*(0.65 + 1.20*amp);
+  col += spectral(f*0.75 + u_t*0.03)*smoothstep(0.016, 0.0, abs(r - R0 - h))*gap*amp*0.9;
+  col += spectral(0.12 + u_t*0.05)*smoothstep(0.0045, 0.0, abs(r - R0 + 0.013))*(0.22 + 0.45*u_beat);
   gl_FragColor = vec4(max(col, 0.0)*u_amt, 1.0);
 }`;
 
@@ -949,7 +962,9 @@ void main(){
       out.level = 0.40 + 0.30*kk;
       for(i=0;i<SPEC_N;i++){
         var f = i/(SPEC_N - 1);
-        var vv = (1 - f*0.8)*(0.45 + 0.55*Math.sin(t*2.0 + f*9.0))*(0.4 + 0.6*kk)*255;
+        var vv = (1 - f*0.72)
+               * (0.30 + 0.40*Math.sin(t*2.1 + f*11.0) + 0.30*Math.sin(t*3.7 - f*19.0))
+               * (0.35 + 0.65*kk) * 255;
         vv = Math.max(0, Math.min(255, vv));
         specData[i*4] = vv; specData[i*4+1] = vv; specData[i*4+2] = vv; specData[i*4+3] = 255;
       }
@@ -992,20 +1007,24 @@ void main(){
       dreams.push({ t0: (n > 1) ? a + step*i : (total - MEDIA_LEN)*0.5, clip: clips[i] });
     }
   }
-  var screenMode = "always";
+  var screenMode = "always", holdMode = "spread";
 
   /* always: the screen stays lit and the pictures cycle through it */
   function mediaAt(t){
     if(!clips.length) return null;
     if(screenMode !== "always") return dreamMix(t);
-    var slot = Math.floor(t/MEDIA_LEN);
-    var e = t - slot*MEDIA_LEN;
-    var idx = slot % clips.length;
-    var fade = 0.7;
-    var f = Math.min(e/fade, (MEDIA_LEN - e)/fade, 1);
+    var n = clips.length;
+    var spread = (holdMode === "spread");
+    var slotLen = spread ? Math.max(4, total/n) : holdMode;
+    var slot = Math.floor(t/slotLen);
+    var idx = spread ? Math.min(slot, n - 1) : (slot % n);
+    var e = t - Math.min(slot, spread ? (n - 1) : slot)*slotLen;
+    var fade = Math.min(1.4, slotLen*0.12);
+    var f = Math.min(e/fade, 1);
+    if(!spread || slot < n - 1) f = Math.min(f, (slotLen - e)/fade);
     f = Math.max(0, Math.min(1, f));
     f = f*f*(3 - 2*f);
-    return { clip: clips[idx], mix: f, k: e/MEDIA_LEN, screen: 1 };
+    return { clip: clips[idx], mix: f, k: Math.min(1, e/slotLen), screen: 1 };
   }
 
   function dreamMix(t){
@@ -1396,6 +1415,7 @@ void main(){
       cosmic: $("fCosmic").value,
       mirror: $("fMirror").checked,
       screen: $("fScreen").value,
+      hold: $("fHold").value,
       react: $("fReact").value,
       ring: $("fRing").checked,
       force: $("fForce").checked,
@@ -1411,6 +1431,7 @@ void main(){
     if(o.cosmic) $("fCosmic").value = o.cosmic;
     if(typeof o.mirror === "boolean") $("fMirror").checked = o.mirror;
     if(o.screen) $("fScreen").value = o.screen;
+    if(o.hold)   $("fHold").value   = o.hold;
     if(o.react)  $("fReact").value = o.react;
     if(o.bpm)    $("fBpm").value   = o.bpm;
     if(typeof o.ring === "boolean") $("fRing").checked = o.ring;
@@ -1633,6 +1654,8 @@ void main(){
       cues = parseCues($("fCues").value);
       mirrorDreams = $("fMirror").checked;
       screenMode = $("fScreen").value;
+      var hv = $("fHold").value;
+      holdMode = (hv === "spread") ? "spread" : parseFloat(hv);
       cosmic = parseFloat($("fCosmic").value);
       react = parseFloat($("fReact").value);
       showRing = $("fRing").checked;
