@@ -166,10 +166,12 @@
   .keys{ margin:18px 0 0; font-size:11px; color:var(--dim); letter-spacing:.1em; line-height:1.9; font-weight:300; }
   .keys b{ color:var(--ink); font-weight:400; }
   #tap{
-    position:fixed; inset:0; z-index:40; display:none;
-    align-items:center; justify-content:center; cursor:pointer;
-    background:rgba(0,0,0,.55); backdrop-filter:blur(2px);
-    font-size:12px; letter-spacing:.26em; color:var(--ink); text-align:center; padding:24px;
+    position:fixed; z-index:40; display:none;
+    left:50%; transform:translateX(-50%);
+    bottom:calc(64px + env(safe-area-inset-bottom, 0px));
+    padding:12px 20px; border-radius:999px; cursor:pointer;
+    background:rgba(12,12,14,.88); border:1px solid var(--warm);
+    font-size:11px; letter-spacing:.22em; color:var(--warm); white-space:nowrap;
   }
   #crash{
     position:fixed; left:0; right:0; top:0; z-index:99;
@@ -281,7 +283,14 @@
       <label class="filebtn" for="fClips"><span>Choose videos and photos</span><span id="cName" style="margin-left:auto;color:var(--warm)"></span>
         <input id="fClips" type="file" accept="video/*,image/*" multiple>
       </label>
-      <p class="hint">Each one surfaces for six seconds, in the order you pick them, spaced evenly across the whole song. They melt out of the light and back into it rather than cutting. Sky, cloud, nature and street material works best.</p>
+      <p class="hint">Six seconds each, in the order you pick them. They melt out of the light and back into it rather than cutting. Sky, cloud, nature and street material works best.</p>
+      <div style="margin-top:12px">
+        <label for="fScreen">The circular screen</label>
+        <select id="fScreen">
+          <option value="always" selected>Always lit, pictures cycling through it</option>
+          <option value="sparse">Appears only when a picture does</option>
+        </select>
+      </div>
       <label style="display:flex;align-items:center;gap:9px;margin-top:11px;letter-spacing:.02em;font-size:12.5px;color:var(--ink);text-transform:none">
         <input id="fMirror" type="checkbox" checked style="width:auto;accent-color:var(--warm)"> Mirror the dreams down the centre
       </label>
@@ -310,6 +319,13 @@
         <label for="fBpm">Tempo if silent</label>
         <input id="fBpm" type="text" value="86" inputmode="numeric" autocomplete="off">
       </div>
+    </div>
+
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:9px;letter-spacing:.02em;font-size:12.5px;color:var(--ink);text-transform:none">
+        <input id="fForce" type="checkbox" style="width:auto;accent-color:var(--warm)"> Analyse the audio on iPhone too
+      </label>
+      <p class="hint">Off by default: on iOS, routing the song through the analyser can silence it. Leave it off and the song plays while the visuals follow the tempo above.</p>
     </div>
 
     <div class="row field">
@@ -663,6 +679,7 @@ void main(){
     "uniform float u_pulse;",
     "uniform sampler2D u_vid;",
     "uniform float u_vidMix;",
+    "uniform float u_screen;",
     "uniform float u_vidWarp;",
     "uniform vec2 u_vidScale;",
     "uniform float u_mirror;",
@@ -695,33 +712,37 @@ void main(){
     "  }",
     "  bl /= 8.0;",
     "  col += pow(max(bl - 0.34, 0.0), vec3(1.2))*1.15;",
-    "  if(u_vidMix > 0.002){",
-    "    vec2 q = vec2(c.x*u_win.x, c.y);",                 /* isotropic: a true circle */
-    "    float R = u_win.y*(0.86 + 0.14*u_vidMix)*(1.0 + 0.035*u_beat);",
+    "  if(u_screen > 0.002){",
+    "    vec2 q = vec2(c.x*u_win.x, c.y);",
+    "    float R = u_win.y*(0.90 + 0.10*u_screen)*(1.0 + 0.035*u_beat);",
     "    float rr = length(q);",
-    "    vec2 vu = q/(2.0*R) + 0.5;",
-    "    vu = (vu - 0.5)*(1.0 - 0.09*(1.0 - clamp(rr/R, 0.0, 1.0))) + 0.5;",  /* curved screen */
-    "    vu = (vu - 0.5)*u_vidScale + 0.5;",
-    "    if(u_mirror > 0.5) vu.x = abs(vu.x*2.0 - 1.0);",
-    "    float wp = 0.012 + 0.10*u_vidWarp*u_vidWarp;",
-    "    vu += (vec2(nz(uv*3.0 + u_t*0.2), nz(uv*3.0 - u_t*0.17 + 9.0)) - 0.5)*wp;",
-    "    vec3 v = texture2D(u_vid, clamp(vu, 0.0, 1.0)).rgb;",
-    "    v = mix(vec3(dot(v, vec3(0.299,0.587,0.114))), v, 0.74);",
-    "    v = pow(max(v, 0.0), vec3(1.12))*1.10;",
-    "    v *= 1.0 - 0.07*sin(gl_FragCoord.y*2.1);",          /* projector scan */
-    "    v *= 1.0 - 0.42*pow(clamp(rr/R, 0.0, 1.0), 3.0);",  /* light falls off to the rim */
     "    float sd = rr - R;",
     "    float feather = 0.014 + 0.13*u_vidWarp;",
     "    float ero = 0.075*u_vidWarp*nz(uv*6.0 - u_t*0.5);",
     "    float mask = smoothstep(feather, -feather*0.8, sd + ero);",
-    "    v = mix(v, (v + col)*0.5, u_vidWarp*0.65);",
-    "    vec3 scr = 1.0 - (1.0-col)*(1.0 - v*0.95);",
-    "    col = mix(col, scr, u_vidMix*mask);",
-    "    col += spectral(u_t*0.05)*smoothstep(0.011, 0.0, abs(sd))*u_vidMix*(0.55 + 0.70*u_beat);",
-    "    col += spectral(0.10 + u_t*0.03)*exp(-max(sd, 0.0)*11.0)*u_vidMix*0.30;",
+    "    vec3 inner = col*0.28 + spectral(0.10 + u_t*0.04)*0.045;",
+    "    if(u_vidMix > 0.002){",
+    "      vec2 vu = q/(2.0*R) + 0.5;",
+    "      vu = (vu - 0.5)*(1.0 - 0.09*(1.0 - clamp(rr/R, 0.0, 1.0))) + 0.5;",
+    "      vu = (vu - 0.5)*u_vidScale + 0.5;",
+    "      if(u_mirror > 0.5) vu.x = abs(vu.x*2.0 - 1.0);",
+    "      float wp = 0.012 + 0.10*u_vidWarp*u_vidWarp;",
+    "      vu += (vec2(nz(uv*3.0 + u_t*0.2), nz(uv*3.0 - u_t*0.17 + 9.0)) - 0.5)*wp;",
+    "      vec3 v = texture2D(u_vid, clamp(vu, 0.0, 1.0)).rgb;",
+    "      v = mix(vec3(dot(v, vec3(0.299,0.587,0.114))), v, 0.74);",
+    "      v = pow(max(v, 0.0), vec3(1.12))*1.10;",
+    "      v *= 1.0 - 0.07*sin(gl_FragCoord.y*2.1);",
+    "      v *= 1.0 - 0.42*pow(clamp(rr/R, 0.0, 1.0), 3.0);",
+    "      v = mix(v, (v + col)*0.5, u_vidWarp*0.65);",
+    "      vec3 scr = 1.0 - (1.0-col)*(1.0 - v*0.95);",
+    "      inner = mix(inner, scr, u_vidMix);",
+    "    }",
+    "    col = mix(col, inner, mask*u_screen);",
+    "    col += spectral(u_t*0.05)*smoothstep(0.011, 0.0, abs(sd))*u_screen*(0.55 + 0.70*u_beat);",
+    "    col += spectral(0.10 + u_t*0.03)*exp(-max(sd, 0.0)*11.0)*u_screen*0.30;",
     "    float ba = atan(q.y, q.x);",
     "    float beams = pow(0.5 + 0.5*sin(ba*7.0 + u_t*0.22), 14.0);",
-    "    col += spectral(0.45 + u_t*0.04)*beams*smoothstep(R*0.95, R*3.2, rr)*u_vidMix*0.32;",
+    "    col += spectral(0.45 + u_t*0.04)*beams*smoothstep(R*0.95, R*3.2, rr)*u_screen*0.32;",
     "  }",
     "  col += spectral(u_t*0.02)*u_air*0.22;",
     "  col *= u_gain;",
@@ -870,8 +891,12 @@ void main(){
 
   /* ============ audio ============ */
   var actx=null, analyser=null, freq=null, hasAudio=false;
+  var IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+            (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
   function wireAudio(){
     if(actx || !hasAudio) return;
+    if(IOS && !forceAnalyse) return;   /* play the song natively; visuals use the tempo */
     var AC = window.AudioContext || window.webkitAudioContext;
     if(!AC) return;
     /* if this fails the song still plays, it just stops driving the visuals */
@@ -891,7 +916,7 @@ void main(){
   }
   var SPEC_N = 64;
   var specData = new Uint8Array(SPEC_N*4);
-  var react = 1.0, bpm = 86, showRing = true;
+  var react = 1.0, bpm = 86, showRing = true, forceAnalyse = false;
   var lowHist = [], lastBeat = -9, beatEnv = 0;
 
   function analyse(t){
@@ -967,6 +992,22 @@ void main(){
       dreams.push({ t0: (n > 1) ? a + step*i : (total - MEDIA_LEN)*0.5, clip: clips[i] });
     }
   }
+  var screenMode = "always";
+
+  /* always: the screen stays lit and the pictures cycle through it */
+  function mediaAt(t){
+    if(!clips.length) return null;
+    if(screenMode !== "always") return dreamMix(t);
+    var slot = Math.floor(t/MEDIA_LEN);
+    var e = t - slot*MEDIA_LEN;
+    var idx = slot % clips.length;
+    var fade = 0.7;
+    var f = Math.min(e/fade, (MEDIA_LEN - e)/fade, 1);
+    f = Math.max(0, Math.min(1, f));
+    f = f*f*(3 - 2*f);
+    return { clip: clips[idx], mix: f, k: e/MEDIA_LEN, screen: 1 };
+  }
+
   function dreamMix(t){
     for(var i=0;i<dreams.length;i++){
       var d = dreams[i], e = t - d.t0;
@@ -974,7 +1015,7 @@ void main(){
       var f = Math.min(e/MEDIA_FADE, (MEDIA_LEN - e)/MEDIA_FADE, 1);
       f = Math.max(0, Math.min(1, f));
       f = f*f*(3 - 2*f);
-      return { clip: d.clip, mix: f, k: e/MEDIA_LEN };
+      return { clip: d.clip, mix: f, k: e/MEDIA_LEN, screen: f };
     }
     return null;
   }
@@ -1132,7 +1173,7 @@ void main(){
     }
 
     /* lucid dream media — video or photo */
-    var dm = dreamMix(t), vmix = 0, vwarp = 0, vsx = 1, vsy = 1;
+    var dm = mediaAt(t), vmix = 0, vwarp = 0, vsx = 1, vsy = 1, vscreen = 0;
     for(var ci=0; ci<clips.length; ci++){
       if(clips[ci].kind !== "video") continue;
       var el = clips[ci].el, want = (dm && dm.clip === clips[ci]);
@@ -1141,11 +1182,10 @@ void main(){
     }
     if(dm){
       var it = dm.clip, src = it.el;
-      var ready = (it.kind === "video") ? (src.readyState >= 2)
-                                        : (src.complete && src.naturalWidth > 0);
+      var ready = (it.kind === "video") ? (src.readyState >= 2) : (it.ready === true);
       if(ready){
-        var mw = (it.kind === "video") ? src.videoWidth  : src.naturalWidth;
-        var mh = (it.kind === "video") ? src.videoHeight : src.naturalHeight;
+        var mw = (it.kind === "video") ? src.videoWidth  : it.w;
+        var mh = (it.kind === "video") ? src.videoHeight : it.h;
         var ma = mw/Math.max(1, mh);
         if(ma > CARD_AR){ vsx = CARD_AR/ma; vsy = 1; } else { vsx = 1; vsy = ma/CARD_AR; }
         var push = 1 - 0.10*dm.k;   /* slow drift inward over the six seconds */
@@ -1156,10 +1196,13 @@ void main(){
           try{
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
             lastUpload = it;
-          }catch(e){}
+          }catch(e){
+            if(!it.warned){ it.warned = true; fail("Could not show " + it.name + ": " + (e.message || e)); }
+          }
           gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
         }
         if(lastUpload === it){ vmix = dm.mix; vwarp = 1 - dm.mix; }
+        vscreen = dm.screen;
       }
     }
 
@@ -1174,6 +1217,7 @@ void main(){
     u1f(progPost, "u_t", t);
     u1f(progPost, "u_pulse", breath);
     u1f(progPost, "u_vidMix", vmix);
+    u1f(progPost, "u_screen", vscreen);
     u1f(progPost, "u_vidWarp", vwarp);
     u2f(progPost, "u_vidScale", vsx, vsy);
     u1f(progPost, "u_mirror", mirrorDreams ? 1 : 0);
@@ -1220,6 +1264,13 @@ void main(){
     clearTimeout(hideTimer);
     hideTimer = setTimeout(function(){ hud.classList.remove("show"); }, 2600);
   }
+  function kickAudio(){
+    if(actx && actx.resume) silence(actx.resume());
+    if(hasAudio){ silence(aud.play()); checkAudio(); }
+  }
+  window.addEventListener("pointerdown", function(){
+    if(hasAudio && playing && aud.paused) kickAudio();
+  });
   $("tap").addEventListener("click", function(){
     hideTap();
     if(actx && actx.resume) silence(actx.resume());
@@ -1243,11 +1294,20 @@ void main(){
     }
     $("btnPlay").textContent = on ? "Pause" : "Play";
   }
+  var audioWatch = null;
+  function watchAudio(){
+    clearInterval(audioWatch);
+    audioWatch = setInterval(function(){
+      if(!hasAudio || !playing) return;
+      if(aud.currentTime > 0.05 && !aud.paused) hideTap();
+    }, 700);
+  }
+
   function restart(){
     if(hasAudio){ try{ aud.currentTime = 0; }catch(e){} }
     pausedAt = 0; startedAt = performance.now();
     setPlaying(true);
-    if(hasAudio) checkAudio();
+    if(hasAudio){ checkAudio(); watchAudio(); }
   }
 
   /* if the track never gets going, offer a tap — iOS sometimes needs a second gesture */
@@ -1262,7 +1322,7 @@ void main(){
       showTap();
     }, 1800);
   }
-  function showTap(){ $("tap").style.display = "flex"; }
+  function showTap(){ $("tap").style.display = "block"; }
   function hideTap(){ $("tap").style.display = "none"; }
   $("btnPlay").addEventListener("click", function(){ setPlaying(!playing); });
   $("btnRestart").addEventListener("click", restart);
@@ -1335,8 +1395,10 @@ void main(){
       len: $("fLen").value,
       cosmic: $("fCosmic").value,
       mirror: $("fMirror").checked,
+      screen: $("fScreen").value,
       react: $("fReact").value,
       ring: $("fRing").checked,
+      force: $("fForce").checked,
       bpm: $("fBpm").value
     };
   }
@@ -1348,9 +1410,11 @@ void main(){
     if(o.len)    $("fLen").value    = o.len;
     if(o.cosmic) $("fCosmic").value = o.cosmic;
     if(typeof o.mirror === "boolean") $("fMirror").checked = o.mirror;
+    if(o.screen) $("fScreen").value = o.screen;
     if(o.react)  $("fReact").value = o.react;
     if(o.bpm)    $("fBpm").value   = o.bpm;
     if(typeof o.ring === "boolean") $("fRing").checked = o.ring;
+    if(typeof o.force === "boolean") $("fForce").checked = o.force;
   }
   function refreshPresets(keep){
     var el = $("fPreset"), all = readStore(PKEY) || {}, names = Object.keys(all).sort();
@@ -1508,6 +1572,32 @@ void main(){
     }).join("\n");
   });
 
+  /* phone photos are far larger than any GPU will take as a texture — resize first */
+  var MAX_TEX = 1280;
+  function prepImage(img, item){
+    function build(){
+      try{
+        var w = img.naturalWidth, h = img.naturalHeight;
+        if(!w || !h) return;
+        var sc = Math.min(1, MAX_TEX/Math.max(w, h));
+        var cw = Math.max(1, Math.round(w*sc)), ch = Math.max(1, Math.round(h*sc));
+        var cvs = document.createElement("canvas");
+        cvs.width = cw; cvs.height = ch;
+        cvs.getContext("2d").drawImage(img, 0, 0, cw, ch);
+        item.el = cvs; item.w = cw; item.h = ch; item.ready = true;
+      }catch(e){
+        fail("Could not prepare " + item.name + ": " + (e.message || e));
+      }
+    }
+    if(img.complete && img.naturalWidth > 0) build();
+    else {
+      img.addEventListener("load", build, {once:true});
+      img.addEventListener("error", function(){
+        fail("Could not read " + item.name + " — try a JPG or PNG.");
+      }, {once:true});
+    }
+  }
+
   $("fClips").addEventListener("change", function(){
     var all = this.files ? Array.prototype.slice.call(this.files) : [];
     var fs = all.slice(0, MAX_MEDIA);
@@ -1527,7 +1617,9 @@ void main(){
         el.decoding = "async";
         el.src = URL.createObjectURL(f);
       }
-      clips.push({ el: el, kind: isVid ? "video" : "image", name: f.name });
+      var item = { el: el, kind: isVid ? "video" : "image", name: f.name };
+      if(!isVid) prepImage(el, item);
+      clips.push(item);
     });
     var n = clips.length;
     $("cName").textContent = n ? (n + (n === 1 ? " item" : " items") + (all.length > n ? " (max 12)" : "")) : "";
@@ -1540,9 +1632,11 @@ void main(){
       buildTimeline();
       cues = parseCues($("fCues").value);
       mirrorDreams = $("fMirror").checked;
+      screenMode = $("fScreen").value;
       cosmic = parseFloat($("fCosmic").value);
       react = parseFloat($("fReact").value);
       showRing = $("fRing").checked;
+      forceAnalyse = $("fForce").checked;
       var bv = parseFloat($("fBpm").value);
       bpm = (isFinite(bv) && bv >= 40 && bv <= 220) ? bv : 86;
       lowHist = []; lastBeat = -9; beatEnv = 0;
